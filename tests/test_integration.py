@@ -10,35 +10,15 @@ Tests full MQTT flow by:
 
 import os
 import time
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
 
 import paramiko
 import paho.mqtt.client as mqtt_client
-from testcontainers.core.container import DockerContainer
-from testcontainers.core.wait_strategies import LogMessageWaitStrategy
+
+from tests.fixtures.containers import start_mqtt_broker
 
 # Topic where temperature readings are published
 MQTT_TOPIC = "test/temp/F"
-
-
-@contextmanager
-def mqtt_broker() -> Generator[tuple[DockerContainer, int]]:
-    """
-    Start MQTT broker in testcontainer and wait for it to be ready.
-
-    Yields:
-        Tuple of (container, broker_port)
-    """
-    with (
-        DockerContainer("eclipse-mosquitto:2")
-        .with_exposed_ports(1883)
-        .with_command("mosquitto -c /mosquitto-no-auth.conf")
-        .waiting_for(LogMessageWaitStrategy("mosquitto version .* running"))
-    ) as broker:
-        port = broker.get_exposed_port(1883)
-        yield broker, port
 
 
 def test_hil_mqtt_integration() -> None:
@@ -59,7 +39,8 @@ def test_hil_mqtt_integration() -> None:
         pi_hostname = pi_host
 
     # Arrange - Start MQTT broker
-    with mqtt_broker() as (_, broker_port):
+    with start_mqtt_broker() as broker:
+        broker_port = broker.port
         print(
             f"[{time.time() - start_time:.1f}s] MQTT broker started on port {broker_port}"
         )
