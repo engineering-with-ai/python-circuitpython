@@ -4,6 +4,8 @@ stages:
 
 checks:
   stage: check
+  variables:
+    UV_FROZEN: "true"
   script:
     - uv run poe checks
     - uv run pytest --junitxml=junit.xml src
