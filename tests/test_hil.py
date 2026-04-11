@@ -9,16 +9,25 @@ Tests full MQTT flow by:
 """
 
 import os
+import socket
+import threading
 import time
 from pathlib import Path
 
 import paramiko
 import paho.mqtt.client as mqtt_client
+from paho.mqtt.client import CallbackAPIVersion
 
 from tests.fixtures.containers import start_mqtt_broker
 
 # Topic where temperature readings are published
 MQTT_TOPIC = "test/temp/F"
+
+# Maximum time to wait for subscription confirmation (seconds)
+SUBSCRIBE_TIMEOUT = 10
+
+# Maximum time to wait for MQTT message after app completes (seconds)
+MESSAGE_TIMEOUT = 10
 
 
 def test_hil_mqtt_integration() -> None:
@@ -29,6 +38,9 @@ def test_hil_mqtt_integration() -> None:
     It will fail if hardware is not available.
     """
     start_time = time.time()
+
+    def log(msg: str) -> None:
+        print(f"[{time.time() - start_time:.1f}s] {msg}")
 
     # Get Pi connection details from environment
     pi_host = os.environ.get("PI_HOST", "pi@raspberrypi.local")
@@ -44,47 +56,78 @@ def test_hil_mqtt_integration() -> None:
     # Arrange - Start MQTT broker
     with start_mqtt_broker() as broker:
         broker_port = broker.port
-        print(
-            f"[{time.time() - start_time:.1f}s] MQTT broker started on port {broker_port}"
-        )
+        log(f"MQTT broker started on port {broker_port}")
 
         # Get host IP that Pi can reach (not localhost)
-        import socket
-
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         host_ip = s.getsockname()[0]
         s.close()
 
-        print(f"[{time.time() - start_time:.1f}s] Host IP for Pi to connect: {host_ip}")
+        log(f"Host IP for Pi to connect: {host_ip}")
 
         # Setup subscriber to capture published messages
         received_messages: list[str] = []
+        subscribed = threading.Event()
+
+        def on_connect(
+            _client: mqtt_client.Client,
+            _userdata: object,
+            _flags: object,
+            reason_code: object,
+            _properties: object,
+        ) -> None:
+            log(f"Subscriber connected (rc={reason_code})")
+            _client.subscribe(MQTT_TOPIC)
+
+        def on_subscribe(
+            _client: mqtt_client.Client,
+            _userdata: object,
+            _mid: int,
+            _reason_codes: object,
+            _properties: object,
+        ) -> None:
+            log(f"Subscription confirmed for {MQTT_TOPIC}")
+            subscribed.set()
 
         def on_message(
             _client: mqtt_client.Client,
             _userdata: object,
             message: mqtt_client.MQTTMessage,
         ) -> None:
-            received_messages.append(message.payload.decode())
+            payload = message.payload.decode()
+            log(f"Message received on {message.topic}: {payload}")
+            received_messages.append(payload)
 
         subscriber = mqtt_client.Client(
+            callback_api_version=CallbackAPIVersion.VERSION2,
             client_id="hil_test_client",
             protocol=mqtt_client.MQTTv5,
         )
+        subscriber.on_connect = on_connect
+        subscriber.on_subscribe = on_subscribe
         subscriber.on_message = on_message
+
+        log("Connecting subscriber to broker...")
         subscriber.connect("localhost", broker_port)
-        subscriber.subscribe(MQTT_TOPIC)
         subscriber.loop_start()
 
+        # Reason: subscribe() races with loop_start() — the SUBSCRIBE packet
+        # can't be sent until the loop thread runs. Wait for SUBACK before
+        # launching the Pi app so we don't miss the first (and only) message.
+        assert subscribed.wait(timeout=SUBSCRIBE_TIMEOUT), (
+            f"Subscription not confirmed within {SUBSCRIBE_TIMEOUT}s"
+        )
+
         # Deploy and run code on Pi using paramiko
-        print(f"[{time.time() - start_time:.1f}s] Deploying code to Pi via SSH...")
+        log("Deploying code to Pi via SSH...")
 
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # noqa: S507
 
         try:
             ssh.connect(pi_hostname, username=pi_user)
+            log(f"SSH connected to {pi_hostname}")
 
             # Create remote directory
             ssh.exec_command("mkdir -p /tmp/circuitpython-test")
@@ -115,16 +158,18 @@ def test_hil_mqtt_integration() -> None:
             )
 
             sftp.close()
+            log("Files deployed")
 
-            print(f"[{time.time() - start_time:.1f}s] Running application on Pi...")
-
-            # Run application on Pi with environment variables
-            _stdin, stdout, stderr = ssh.exec_command(
+            log("Running application on Pi...")
+            cmd = (
                 f"cd /tmp/circuitpython-test && "
                 f"MQTT_HOST={host_ip} MQTT_PORT={broker_port} MODE=development "
-                f"{pi_python} -m src.main",
-                get_pty=True,
-                timeout=30,
+                f"{pi_python} -m src.main"
+            )
+            log(f"CMD: {cmd}")
+
+            _stdin, stdout, stderr = ssh.exec_command(
+                cmd, get_pty=True, timeout=30,
             )
 
             # Wait for command to complete
@@ -133,12 +178,11 @@ def test_hil_mqtt_integration() -> None:
             stdout_text = stdout.read().decode()
             stderr_text = stderr.read().decode()
 
-            print(f"[{time.time() - start_time:.1f}s] Application completed")
-            print(f"Exit status: {exit_status}")
+            log(f"Application completed (exit={exit_status})")
             if stdout_text:
-                print(f"STDOUT: {stdout_text}")
+                log(f"STDOUT: {stdout_text}")
             if stderr_text:
-                print(f"STDERR: {stderr_text}")
+                log(f"STDERR: {stderr_text}")
 
             # Assert - Application ran successfully
             assert (
@@ -148,8 +192,13 @@ def test_hil_mqtt_integration() -> None:
         finally:
             ssh.close()
 
-        # Wait for message to be received
-        time.sleep(1)
+        # Wait for message to arrive
+        log(f"Waiting up to {MESSAGE_TIMEOUT}s for MQTT message...")
+        deadline = time.time() + MESSAGE_TIMEOUT
+        while not received_messages and time.time() < deadline:
+            time.sleep(0.2)
+
+        log(f"Messages received: {len(received_messages)}")
 
         # Assert - Temperature message received
         assert len(received_messages) >= 1, "No MQTT message received"
@@ -162,10 +211,7 @@ def test_hil_mqtt_integration() -> None:
             50.0 <= temp_f <= 104.0
         ), f"Temperature {temp_f}°F is outside reasonable range"
 
-        print(
-            f"[{time.time() - start_time:.1f}s] ✓ Test passed! "
-            f"Received valid temperature: {temp_f}°F"
-        )
+        log(f"Test passed! Received valid temperature: {temp_f}°F")
 
         # Cleanup
         subscriber.loop_stop()
