@@ -60,10 +60,10 @@ security = ["audit-src", "audit-packages"]
 checks = ["depcheck", "format", "lint", "typecheck", "security"]
 unit = "pytest -vv src/*"
 # Reason: absolute paths work around pytest-xdist #971 (relative path resolution bug)
-sensors-test = "bash -c 'pytest -d --tx ssh=${PI_HOST:-pi@raspberrypi.local}//python=${PI_PYTHON:-/home/pi/python-circuitpython/.venv/bin/python} --rsyncdir $(realpath src) --rsyncdir $(realpath tests) $(realpath tests/test_sensors.py) -p no:warnings'"
-integration = "pytest -vv tests/test_integration.py"
+integration = "bash -c 'pytest -d --tx ssh=${PI_HOST:-pi@raspberrypi.local}//python=${PI_PYTHON:-/home/pi/python-circuitpython/.venv/bin/python} --rsyncdir $(realpath src) --rsyncdir $(realpath tests) $(realpath tests/test_integration.py) -p no:warnings'"
+hardware-in-loop = "pytest -vv tests/test_hil.py"
 healthcheck = "bash -c 'ssh -o ConnectTimeout=10 -o BatchMode=yes ${PI_HOST:-pi@raspberrypi.local} echo NETWORK_READY'"
-test = ["unit", "healthcheck", "sensors-test", "integration"]
+test = ["unit", "healthcheck", "integration", "hardware-in-loop"]
 cover = "pytest -vv --cov --cov-branch --cov-report=term-missing src/"
 review = "claude 'run code-reviewer agent against diff for simplicity and elegance'"
 commit = "bash -c 'uv run poe checks && uv run poe test && uv run poe review && git add -A && git cz && git push'"

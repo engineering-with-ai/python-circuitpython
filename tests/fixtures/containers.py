@@ -56,16 +56,15 @@ def _start_container(
 
 @contextmanager
 def start_mqtt_broker() -> Generator[Container]:
-    """Start a Mosquitto MQTT broker with dynamic port.
+    """Start an EMQX MQTT broker with dynamic port.
 
     Yields:
         Container with mqtt:// URL and dynamic port
     """
     c = (
-        DockerContainer("eclipse-mosquitto:2")
+        DockerContainer("emqx/emqx:latest")
         .with_exposed_ports(1883)
-        .with_command("mosquitto -c /mosquitto-no-auth.conf")
-        .waiting_for(LogMessageWaitStrategy("mosquitto version .* running"))
+        .waiting_for(LogMessageWaitStrategy("Listener tcp:default on 0.0.0.0:1883 started."))
     )
 
     with c:

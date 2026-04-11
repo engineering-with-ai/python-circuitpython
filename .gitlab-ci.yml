@@ -1,6 +1,5 @@
 stages:
   - check
-  - hil
   - mirror
 
 checks:
@@ -12,6 +11,9 @@ checks:
     - uv run pytest --junitxml=junit.xml src
     - uv run poe cover
     - uv run coverage xml
+    - uv run poe healthcheck
+    - uv run poe integration
+    - uv run poe hardware-in-loop
   coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
   artifacts:
     when: always
@@ -20,13 +22,6 @@ checks:
       coverage_report:
         coverage_format: cobertura
         path: coverage.xml
-
-hil:
-  stage: hil
-  script:
-    - uv run poe healthcheck
-    - uv run poe sensors-test
-    - uv run poe integration
 
 mirror:
   stage: mirror
