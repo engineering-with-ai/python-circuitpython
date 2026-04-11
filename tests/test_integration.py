@@ -32,6 +32,9 @@ def test_hil_mqtt_integration() -> None:
 
     # Get Pi connection details from environment
     pi_host = os.environ.get("PI_HOST", "pi@raspberrypi.local")
+    pi_python = os.environ.get(
+        "PI_PYTHON", "/home/pi/python-circuitpython/.venv/bin/python"
+    )
     if "@" in pi_host:
         pi_user, pi_hostname = pi_host.split("@")
     else:
@@ -118,8 +121,8 @@ def test_hil_mqtt_integration() -> None:
             # Run application on Pi with environment variables
             _stdin, stdout, stderr = ssh.exec_command(
                 f"cd /tmp/circuitpython-test && "
-                f"MQTT_PORT={broker_port} MODE=development "
-                f"python3 -m src.main",
+                f"MQTT_HOST={host_ip} MQTT_PORT={broker_port} MODE=development "
+                f"{pi_python} -m src.main",
                 get_pty=True,
                 timeout=30,
             )

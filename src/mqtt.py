@@ -28,8 +28,8 @@ async def get_mqtt_client() -> aiomqtt.Client:
     """
     # Read MQTT_PORT dynamically to support integration tests with dynamic ports
     mqtt_port = int(os.environ.get("MQTT_PORT", "1883"))
-    # Use localhost if MQTT_PORT is overridden (for integration tests with testcontainers)
-    mqtt_host = "localhost" if os.environ.get("MQTT_PORT") else CONFIG.mqtt_host
+    # Reason: MQTT_HOST override needed when broker runs on a different machine (e.g. dev machine during HIL tests)
+    mqtt_host = os.environ.get("MQTT_HOST", CONFIG.mqtt_host)
 
     logging.info(f"Connecting to MQTT broker at {mqtt_host}:{mqtt_port}")
 
