@@ -16,7 +16,6 @@ from pathlib import Path
 
 import paramiko
 import paho.mqtt.client as mqtt_client
-from paho.mqtt.client import CallbackAPIVersion
 
 from tests.fixtures.containers import start_mqtt_broker
 
@@ -100,7 +99,7 @@ def test_hil_mqtt_integration() -> None:
             received_messages.append(payload)
 
         subscriber = mqtt_client.Client(
-            callback_api_version=CallbackAPIVersion.VERSION2,
+            callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2,  # type: ignore[attr-defined]
             client_id="hil_test_client",
             protocol=mqtt_client.MQTTv5,
         )
